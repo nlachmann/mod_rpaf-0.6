@@ -175,11 +175,11 @@ static const char *rpaf_set_recursive(cmd_parms *cmd, void *dummy, int flag) {
     return NULL;
 }
 
-static int is_in_array(const char *remote_ip, apr_array_header_t *proxy_ips) {
+static int is_in_array(const char *client_ip, apr_array_header_t *proxy_ips) {
     int i;
     char **list = (char**)proxy_ips->elts;
     for (i = 0; i < proxy_ips->nelts; i++) {
-        if (strncmp(remote_ip, list[i], strlen(list[i])) == 0)
+        if (strncmp(client_ip, list[i], strlen(list[i])) == 0)
             return 1;
     }
     return 0;
@@ -202,13 +202,13 @@ static char *extract_ip(apr_array_header_t *arr, apr_array_header_t *proxy_ips, 
 
 static apr_status_t rpaf_cleanup(void *data) {
     rpaf_cleanup_rec *rcr = (rpaf_cleanup_rec *)data;
-    rcr->r->connection->remote_ip   = apr_pstrdup(rcr->r->connection->pool, rcr->old_ip);
-    rcr->r->connection->remote_addr->sa.sin.sin_addr.s_addr = apr_inet_addr(rcr->r->connection->remote_ip);
-    rcr->r->connection->remote_addr->sa.sin.sin_family = rcr->old_family;
+    rcr->r->connection->client_ip   = apr_pstrdup(rcr->r->connection->pool, rcr->old_ip);
+    rcr->r->connection->client_addr->sa.sin.sin_addr.s_addr = apr_inet_addr(rcr->r->connection->client_ip);
+    rcr->r->connection->client_addr->sa.sin.sin_family = rcr->old_family;
     return APR_SUCCESS;
 }
 
-static int change_remote_ip(request_rec *r) {
+static int change_client_ip(request_rec *r) {
     const char *fwdvalue;
     const char *fwdvalue_temp;
     int i;
@@ -219,7 +219,7 @@ static int change_remote_ip(request_rec *r) {
     if (!cfg->enable)
         return DECLINED;
 
-    if (is_in_array(r->connection->remote_ip, cfg->proxy_ips) == 1) {
+    if (is_in_array(r->connection->client_ip, cfg->proxy_ips) == 1) {
         /* check if cfg->headername is set and if it is use
            that instead of X-Forwarded-For by default */
         if (cfg->headername && (fwdvalue = apr_table_get(r->headers_in, cfg->headername))) {
@@ -246,13 +246,13 @@ static int change_remote_ip(request_rec *r) {
             }
 
             if (arr->nelts > 0) {
-                rcr->old_ip = apr_pstrdup(r->connection->pool, r->connection->remote_ip);
-                rcr->old_family = r->connection->remote_addr->sa.sin.sin_family;
+                rcr->old_ip = apr_pstrdup(r->connection->pool, r->connection->client_ip);
+                rcr->old_family = r->connection->client_addr->sa.sin.sin_family;
                 rcr->r = r;
                 apr_pool_cleanup_register(r->pool, (void *)rcr, rpaf_cleanup, apr_pool_cleanup_null);
-                r->connection->remote_ip = apr_pstrdup(r->connection->pool, extract_ip(arr, cfg->proxy_ips, cfg->recursive));
-                r->connection->remote_addr->sa.sin.sin_addr.s_addr = apr_inet_addr(r->connection->remote_ip);
-                r->connection->remote_addr->sa.sin.sin_family = AF_INET;
+                r->connection->client_ip = apr_pstrdup(r->connection->pool, extract_ip(arr, cfg->proxy_ips, cfg->recursive));
+                r->connection->client_addr->sa.sin.sin_addr.s_addr = apr_inet_addr(r->connection->client_ip);
+                r->connection->client_addr->sa.sin.sin_family = AF_INET;
                 if (cfg->sethostname) {
                     const char *hostvalue;
                     if ((hostvalue = apr_table_get(r->headers_in, "X-Forwarded-Host"))) {
@@ -313,7 +313,7 @@ static const command_rec rpaf_cmds[] = {
 };
 
 static void register_hooks(apr_pool_t *p) {
-    ap_hook_post_read_request(change_remote_ip, NULL, NULL, APR_HOOK_FIRST);
+    ap_hook_post_read_request(change_client_ip, NULL, NULL, APR_HOOK_FIRST);
 }
 
 module AP_MODULE_DECLARE_DATA rpaf_module = {
